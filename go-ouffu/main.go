@@ -27,7 +27,8 @@ const (
 )
 
 type Consumer struct {
-	Key, Secret string
+	Key    string
+	Secret string
 }
 
 type Token struct {
@@ -173,7 +174,7 @@ func init() {
 			return
 		}
 
-		gouffu := []string{"ごうっふ～", "おうっふ～", "もうっふ～", "とうっふ～", "もふもっふ～"}
+		gouffu := []string{"ごうっふ～", "おうっふ～", "もうっふ～", "とうっふ～", "もふもっふ～", "わっふ～", "きゃっふ～"}
 		data := map[string]string{"status": gouffu[rand.Int()%len(gouffu)]}
 		creds.sign(token, data, resURI, "POST")
 		resp, err := client.PostForm(resURI, data)
