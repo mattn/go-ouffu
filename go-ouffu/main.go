@@ -39,29 +39,16 @@ type TempToken struct {
 	Token
 }
 
-func isEncodable(c byte) bool {
-	// return false if c is an unreserved character (see RFC 3986 section 2.3)
-	switch {
-	case (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'):
-		return false
-	case c >= '0' && c <= '9':
-		return false
-	case c == '-' || c == '.' || c == '_' || c == '~':
-		return false
-	}
-	return true
-}
-
 func enc(src string) (dst string) {
 	// RFC3986 sec 2.3
 	t := "0123456789ABCDEF"
 	for _, c := range []byte(src) {
-		if strings.Index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-._~", string(c)) == -1 {
-			dst += string(c)
-		} else {
+		if strings.Index("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~", string(c)) == -1 {
 			dst += "%"
 			dst += string(t[c>>4])
 			dst += string(t[c&15])
+		} else {
+			dst += string(c)
 		}
 	}
 	return
@@ -124,14 +111,12 @@ func (creds *Consumer) sign(token *Token, data map[string]string, uri, httpMetho
 func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
 	data := map[string]string{}
 	creds.sign(nil, data, reqURI, "POST")
-	log.Println(data)
 	r, err := client.PostForm(reqURI, data)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Body.Close()
 	b, _ := ioutil.ReadAll(r.Body)
-	log.Println(string(b))
 	q, _ := http.ParseQuery(string(b))
 	if qt, ok := q["oauth_token"]; !ok || len(qt) == 0 {
 		return nil, os.NewError(string(b))
