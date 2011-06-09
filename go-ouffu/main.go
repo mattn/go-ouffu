@@ -35,10 +35,6 @@ type Token struct {
 	Secret string
 }
 
-type TempToken struct {
-	Token
-}
-
 func enc(src string) (dst string) {
 	// RFC3986 sec 2.3
 	t := "0123456789ABCDEF"
