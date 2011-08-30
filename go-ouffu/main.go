@@ -52,7 +52,8 @@ func enc(src string) (dst string) {
 }
 
 func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) (token *Token, err os.Error) {
-	data := map[string]string{"oauth_verifier": verifier}
+	data := make(http.Values)
+	data.Set("oauth_verifier", verifier)
 	creds.sign(tmp, data, tokenURI, "POST")
 	r, err := client.PostForm(tokenURI, data)
 	if err != nil {
@@ -72,22 +73,22 @@ func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) 
 	return &Token{q["oauth_token"][0], q["oauth_token_secret"][0]}, nil
 }
 
-func (creds *Consumer) sign(token *Token, data map[string]string, uri, httpMethod string) {
+func (creds *Consumer) sign(token *Token, data http.Values, uri, httpMethod string) {
 	rand.Seed(time.Nanoseconds())
-	data["oauth_consumer_key"] = creds.Key
-	data["oauth_nonce"] = fmt.Sprintf("%d_%d", time.Seconds(), rand.Int())
-	data["oauth_signature_method"] = "HMAC-SHA1"
-	data["oauth_timestamp"] = fmt.Sprint(time.Seconds())
+	data.Set("oauth_consumer_key", creds.Key)
+	data.Set("oauth_nonce", fmt.Sprintf("%d_%d", time.Seconds(), rand.Int()))
+	data.Set("oauth_signature_method", "HMAC-SHA1")
+	data.Set("oauth_timestamp", fmt.Sprint(time.Seconds()))
 	if token != nil {
-		data["oauth_token"] = token.Key
+		data.Set("oauth_token", token.Key)
 	} else {
-		data["oauth_token"] = ""
+		data.Set("oauth_token", "")
 	}
-	data["oauth_version"] = "1.0"
+	data.Set("oauth_version", "1.0")
 
 	var items []string
 	for k, v := range data {
-		items = append(items, enc(k)+"="+enc(v))
+		items = append(items, enc(k)+"="+enc(v[0]))
 	}
 	sort.SortStrings(items)
 	head := httpMethod + "&" + enc(uri) + "&" + enc(strings.Join(items, "&"))
@@ -102,11 +103,11 @@ func (creds *Consumer) sign(token *Token, data map[string]string, uri, httpMetho
 	b64enc := base64.NewEncoder(base64.StdEncoding, &buf)
 	b64enc.Write(hash.Sum())
 	b64enc.Close()
-	data["oauth_signature"] = buf.String()
+	data.Set("oauth_signature", buf.String())
 }
 
 func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
-	data := map[string]string{}
+	data := make(http.Values)
 	creds.sign(nil, data, reqURI, "POST")
 	r, err := client.PostForm(reqURI, data)
 	if err != nil {
@@ -147,24 +148,26 @@ func init() {
 			return
 		}
 		url := fmt.Sprintf("%s?oauth_token=%s&oauth_callback=%s", authURI, http.URLEscape(tmp.Key), http.URLEscape(callbackURI))
-		w.Header().Set("Set-Cookie", "tmp="+http.URLEscape(tmp.Key)+"/"+http.URLEscape(tmp.Secret))
+		w.Header().Set("Set-Cookie", "auth="+http.URLEscape(tmp.Key)+"/"+http.URLEscape(tmp.Secret) + "; path=/;")
 		http.Redirect(w, r, url, 302)
 	})
 
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		client := urlfetch.Client(appengine.NewContext(r))
 		v := r.FormValue("oauth_verifier")
-		a := strings.Split(r.Header.Get("Cookie"), "=", -1)
-		w.Header().Set("Set-Cookie", "tmp=")
-		if len(a) != 2 || a[0] != "tmp" {
-			http.Error(w, "invalid request", 500)
+		var c string
+		for _, cookie := range r.Cookie {
+			if cookie.Name == "auth" {
+				c = cookie.Value
+				break
+			}
+		}
+		if c == "" {
+ 			http.Error(w, "invalid request", 401)
 			return
 		}
-		a = strings.Split(a[1], "/", -1)
-		if len(a) != 2 {
-			http.Error(w, "invalid request", 500)
-			return
-		}
+		a := strings.Split(c, "/", 2)
+		w.Header().Set("Set-Cookie", "auth=")
 		ak, _ := http.URLUnescape(a[0])
 		as, _ := http.URLUnescape(a[1])
 		tmp := &Token{ak, as}
@@ -175,7 +178,8 @@ func init() {
 		}
 
 		gouffu := []string{"ごうっふ～", "おうっふ～", "もうっふ～", "とうっふ～", "もふもっふ～", "わっふ～", "きゃっふ～"}
-		data := map[string]string{"status": gouffu[rand.Int()%len(gouffu)]}
+		data := make(http.Values)
+		data.Set("status", gouffu[rand.Int()%len(gouffu)])
 		creds.sign(token, data, resURI, "POST")
 		resp, err := client.PostForm(resURI, data)
 		if err != nil {
