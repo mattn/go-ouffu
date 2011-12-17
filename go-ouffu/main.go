@@ -15,6 +15,7 @@ import (
 	"rand"
 	"sort"
 	"strings"
+	"url"
 	"time"
 )
 
@@ -52,7 +53,7 @@ func enc(src string) (dst string) {
 }
 
 func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) (token *Token, err os.Error) {
-	data := make(http.Values)
+	data := make(url.Values)
 	data.Set("oauth_verifier", verifier)
 	creds.sign(tmp, data, tokenURI, "POST")
 	r, err := client.PostForm(tokenURI, data)
@@ -65,7 +66,7 @@ func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) 
 	defer r.Body.Close()
 
 	b, _ := ioutil.ReadAll(r.Body)
-	q, _ := http.ParseQuery(string(b))
+	q, _ := url.ParseQuery(string(b))
 	if _, ok := q["oauth_token"]; !ok {
 		return nil, os.NewError("invalid request")
 	}
@@ -73,7 +74,7 @@ func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) 
 	return &Token{q["oauth_token"][0], q["oauth_token_secret"][0]}, nil
 }
 
-func (creds *Consumer) sign(token *Token, data http.Values, uri, httpMethod string) {
+func (creds *Consumer) sign(token *Token, data url.Values, uri, httpMethod string) {
 	rand.Seed(time.Nanoseconds())
 	data.Set("oauth_consumer_key", creds.Key)
 	data.Set("oauth_nonce", fmt.Sprintf("%d_%d", time.Seconds(), rand.Int()))
@@ -90,7 +91,7 @@ func (creds *Consumer) sign(token *Token, data http.Values, uri, httpMethod stri
 	for k, v := range data {
 		items = append(items, enc(k)+"="+enc(v[0]))
 	}
-	sort.SortStrings(items)
+	sort.Sort(sort.StringSlice(items[0:]))
 	head := httpMethod + "&" + enc(uri) + "&" + enc(strings.Join(items, "&"))
 	key := enc(creds.Secret) + "&"
 	if token != nil {
@@ -107,7 +108,7 @@ func (creds *Consumer) sign(token *Token, data http.Values, uri, httpMethod stri
 }
 
 func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
-	data := make(http.Values)
+	data := make(url.Values)
 	creds.sign(nil, data, reqURI, "POST")
 	r, err := client.PostForm(reqURI, data)
 	if err != nil {
@@ -115,7 +116,7 @@ func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
 	}
 	defer r.Body.Close()
 	b, _ := ioutil.ReadAll(r.Body)
-	q, _ := http.ParseQuery(string(b))
+	q, _ := url.ParseQuery(string(b))
 	if qt, ok := q["oauth_token"]; !ok || len(qt) == 0 {
 		return nil, os.NewError(string(b))
 	}
@@ -147,29 +148,29 @@ func init() {
 			http.Error(w, err.String(), 500)
 			return
 		}
-		url := fmt.Sprintf("%s?oauth_token=%s&oauth_callback=%s", authURI, http.URLEscape(tmp.Key), http.URLEscape(callbackURI))
-		w.Header().Set("Set-Cookie", "auth="+http.URLEscape(tmp.Key)+"/"+http.URLEscape(tmp.Secret) + "; path=/;")
-		http.Redirect(w, r, url, 302)
+		uri := fmt.Sprintf("%s?oauth_token=%s&oauth_callback=%s", authURI, url.QueryEscape(tmp.Key), url.QueryEscape(callbackURI))
+		w.Header().Set("Set-Cookie", "auth="+url.QueryEscape(tmp.Key)+"/"+url.QueryEscape(tmp.Secret)+"; path=/;")
+		http.Redirect(w, r, uri, 302)
 	})
 
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		client := urlfetch.Client(appengine.NewContext(r))
 		v := r.FormValue("oauth_verifier")
 		var c string
-		for _, cookie := range r.Cookie {
+		for _, cookie := range r.Cookies() {
 			if cookie.Name == "auth" {
 				c = cookie.Value
 				break
 			}
 		}
 		if c == "" {
- 			http.Error(w, "invalid request", 401)
+			http.Error(w, "invalid request", 401)
 			return
 		}
-		a := strings.Split(c, "/", 2)
+		a := strings.SplitN(c, "/", 2)
 		w.Header().Set("Set-Cookie", "auth=")
-		ak, _ := http.URLUnescape(a[0])
-		as, _ := http.URLUnescape(a[1])
+		ak, _ := url.QueryUnescape(a[0])
+		as, _ := url.QueryUnescape(a[1])
 		tmp := &Token{ak, as}
 		token, err := creds.verify(client, tmp, v)
 		if err != nil {
@@ -178,7 +179,7 @@ func init() {
 		}
 
 		gouffu := []string{"ごうっふ～", "おうっふ～", "もうっふ～", "とうっふ～", "もふもっふ～", "わっふ～", "きゃっふ～"}
-		data := make(http.Values)
+		data := make(url.Values)
 		data.Set("status", gouffu[rand.Int()%len(gouffu)])
 		creds.sign(token, data, resURI, "POST")
 		resp, err := client.PostForm(resURI, data)
