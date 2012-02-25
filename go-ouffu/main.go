@@ -5,17 +5,18 @@ import (
 	"appengine/urlfetch"
 	"bytes"
 	"crypto/hmac"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"http"
 	"io/ioutil"
-	"json"
 	"log"
-	"os"
-	"rand"
+	"math/rand"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
-	"url"
 	"time"
 )
 
@@ -52,7 +53,7 @@ func enc(src string) (dst string) {
 	return
 }
 
-func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) (token *Token, err os.Error) {
+func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) (token *Token, err error) {
 	data := make(url.Values)
 	data.Set("oauth_verifier", verifier)
 	creds.sign(tmp, data, tokenURI, "POST")
@@ -61,25 +62,25 @@ func (creds *Consumer) verify(client *http.Client, tmp *Token, verifier string) 
 		return nil, err
 	}
 	if r.StatusCode != 200 {
-		return nil, os.NewError(r.Status)
+		return nil, errors.New(r.Status)
 	}
 	defer r.Body.Close()
 
 	b, _ := ioutil.ReadAll(r.Body)
 	q, _ := url.ParseQuery(string(b))
 	if _, ok := q["oauth_token"]; !ok {
-		return nil, os.NewError("invalid request")
+		return nil, errors.New("invalid request")
 	}
 
 	return &Token{q["oauth_token"][0], q["oauth_token_secret"][0]}, nil
 }
 
 func (creds *Consumer) sign(token *Token, data url.Values, uri, httpMethod string) {
-	rand.Seed(time.Nanoseconds())
+	rand.Seed(time.Now().Unix())
 	data.Set("oauth_consumer_key", creds.Key)
-	data.Set("oauth_nonce", fmt.Sprintf("%d_%d", time.Seconds(), rand.Int()))
+	data.Set("oauth_nonce", fmt.Sprintf("%d_%d", time.Now().Unix(), rand.Int()))
 	data.Set("oauth_signature_method", "HMAC-SHA1")
-	data.Set("oauth_timestamp", fmt.Sprint(time.Seconds()))
+	data.Set("oauth_timestamp", fmt.Sprint(time.Now().Unix()))
 	if token != nil {
 		data.Set("oauth_token", token.Key)
 	} else {
@@ -97,17 +98,17 @@ func (creds *Consumer) sign(token *Token, data url.Values, uri, httpMethod strin
 	if token != nil {
 		key += enc(token.Secret)
 	}
-	hash := hmac.NewSHA1([]byte(key))
+	hash := hmac.New(sha1.New, []byte(key))
 	hash.Write([]byte(head))
 
 	var buf bytes.Buffer
 	b64enc := base64.NewEncoder(base64.StdEncoding, &buf)
-	b64enc.Write(hash.Sum())
+	b64enc.Write(hash.Sum(nil))
 	b64enc.Close()
 	data.Set("oauth_signature", buf.String())
 }
 
-func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
+func (creds *Consumer) request(client *http.Client) (tmp *Token, err error) {
 	data := make(url.Values)
 	creds.sign(nil, data, reqURI, "POST")
 	r, err := client.PostForm(reqURI, data)
@@ -118,7 +119,7 @@ func (creds *Consumer) request(client *http.Client) (tmp *Token, err os.Error) {
 	b, _ := ioutil.ReadAll(r.Body)
 	q, _ := url.ParseQuery(string(b))
 	if qt, ok := q["oauth_token"]; !ok || len(qt) == 0 {
-		return nil, os.NewError(string(b))
+		return nil, errors.New(string(b))
 	}
 	return &Token{q["oauth_token"][0], q["oauth_token_secret"][0]}, nil
 }
@@ -145,7 +146,7 @@ func init() {
 		client := urlfetch.Client(appengine.NewContext(r))
 		tmp, err := creds.request(client)
 		if err != nil {
-			http.Error(w, err.String(), 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		uri := fmt.Sprintf("%s?oauth_token=%s&oauth_callback=%s", authURI, url.QueryEscape(tmp.Key), url.QueryEscape(callbackURI))
@@ -174,7 +175,7 @@ func init() {
 		tmp := &Token{ak, as}
 		token, err := creds.verify(client, tmp, v)
 		if err != nil {
-			http.Error(w, err.String(), 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 
@@ -184,7 +185,7 @@ func init() {
 		creds.sign(token, data, resURI, "POST")
 		resp, err := client.PostForm(resURI, data)
 		if err != nil {
-			http.Error(w, err.String(), 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		defer resp.Body.Close()
@@ -194,13 +195,13 @@ func init() {
 		}
 		b, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			http.Error(w, err.String(), 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		var m map[string]interface{}
 		err = json.Unmarshal(b, &m)
 		if err != nil {
-			http.Error(w, err.String(), 500)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		screen_name := m["user"].(map[string]interface{})["screen_name"].(string)
